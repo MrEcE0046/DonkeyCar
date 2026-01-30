@@ -1,0 +1,11 @@
+gymnasium
+pybullet
+numpy
+opencv-python
+stable-baselines3
+torch
+onnx
+shimmy
+adafruit_servokit
+picamera2
+cv2
