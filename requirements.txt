@@ -2,10 +2,9 @@ gymnasium
 pybullet
 numpy
 opencv-python
-stable-baselines3
+stable-baselines3[extra]
 torch
 onnx
 shimmy
-adafruit_servokit
-picamera2
-cv2
+scipy
+tensorboard
