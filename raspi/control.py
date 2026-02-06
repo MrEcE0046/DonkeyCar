@@ -1,5 +1,7 @@
 import time
-import numpy as np
+
+# Försök importera hårdvarubiblioteket. Om det misslyckas (t.ex. på en PC) 
+# körs koden i "debug-läge" istället för att krascha.
 try:
     from adafruit_servokit import ServoKit
     PCA9685_AVAILABLE = True
@@ -9,83 +11,85 @@ except ImportError:
 class RCControl:
     def __init__(self, steering_channel=0, throttle_channel=1):
         """
-        RC Control via PCA9685 using standard Servo angles for maximum compatibility.
+        RC-kontroll via PCA9685. 
+        Använder standard servovinklar (0-180 grader) för enkelhet.
         """
         self.steering_channel = steering_channel
         self.throttle_channel = throttle_channel
         self.hardware_active = False
         
-        # RC-Dockers Calibration (Brushed Motor)
-        # Neutral: 145. Right: 90. Left: 180.
-        # Range Right = 145-90 = 55. Range Left = 180-145 = 35.
-        # V11: Maximize symmetric range for better curve handling
-        self.steer_neutral = 145
+        # --- KALIBRERING (Bör justeras efter din bils mekanik) ---
+        # 145 är mitten. Höger går mot 90, Vänster går mot 180.
+        self.steer_neutral = 145 
+        
+        # Vi använder en symmetrisk räckvidd på 40 för att AI:n ska 
+        # uppleva att bilen svänger lika mycket åt båda hållen.
         self.steer_range = 40 
         
-        self.throttle_neutral = 120 # Verified STOP value for Brushed ESC
-        self.throttle_max = 45      # 120 + (0.2 * 45) = 129 (Exact 'Slow Forward')
+        # 120 är 'Neutral/Stop' för just detta borstade motorreglage (ESC).
+        self.throttle_neutral = 120 
         
+        # Max gaspådrag (120 + 45 = 165). Sätts lågt för att undvika krascher.
+        self.throttle_max = 45 
+        
+        # Initiera PCA9685-kortet om det finns tillgängligt
         if PCA9685_AVAILABLE:
             try:
                 self.kit = ServoKit(channels=16)
-                # Using DEFAULT pulse width range (usually 500-2500) to match user tests
-                
                 self.mode = "pca9685"
                 self.hardware_active = True
-                print(f"Using PCA9685 (Precision Angle mode).")
-                print(f"Steer Neutral: {self.steer_neutral}, Throttle Neutral: {self.throttle_neutral}")
+                print(f"Hårdvara hittad! Neutral styrning: {self.steer_neutral}")
             except Exception as e:
-                print(f"PCA9685 initialization failed: {e}")
+                print(f"Kunde inte starta PCA9685: {e}")
                 self.hardware_active = False
         
         if not self.hardware_active:
-            print("No PCA9685 found. Debug mode only.")
+            print("Kör i DEBUG-LÄGE (Ingen hårdvara hittad).")
             self.mode = "debug"
 
     def arm(self):
         """
-        Arms the ESC by sending a steady neutral signal.
+        ESC-aktivering: De flesta motorreglage kräver en neutral signal 
+        i några sekunder för att låsa upp säkerhetsspärren.
         """
         if self.mode == "pca9685":
-            print(f"Holding neutral for ESC arming ({self.throttle_neutral})...")
+            print(f"Armerar ESC... Håller neutralgas ({self.throttle_neutral})")
             self.kit.servo[self.throttle_channel].angle = self.throttle_neutral
-            time.sleep(3)
-            print("ESC should be ARMED.")
+            time.sleep(3) # Vänta 3 sekunder på pipet från ESCn
+            print("ESC redo!")
         else:
-            print("Debug mode: Arming skipped.")
+            print("Debug: Hoppar över armering.")
 
     def set_steering(self, action):
         """
-        Action: [-1, 1] 
-        Hardware: Neutral 145, Left 180 (+35), Right 90 (-55)
-        
-        V9 SYMMETRY: Using 35 for BOTH sides to match simulator training.
+        Tar emot ett värde från AI:n mellan -1.0 (höger) och 1.0 (vänster).
+        Konverterar detta till en vinkel mellan ~105 och ~180.
         """
         if self.mode == "pca9685":
-            if action >= 0:
-                # Steering Left: Map [0, 1] to [145, 180]
-                angle = self.steer_neutral + (action * self.steer_range) # 40
-            else:
-                # Steering Right: Map [-1, 0] to [110, 145] (Using symmetric 40)
-                angle = self.steer_neutral + (action * self.steer_range) # 40
+            # Beräkna vinkel: mitten + (beslut * räckvidd)
+            angle = self.steer_neutral + (action * self.steer_range)
             
+            # Säkerställ att vi inte skickar ett värde utanför 0-180 grader
             self.kit.servo[self.steering_channel].angle = max(0, min(180, angle))
         else:
-            print(f"  [STEER] -> {action:5.2f}", end="\r")
+            # I debug-läge skriver vi bara ut vad som skulle hänt
+            print(f"  [STREER] AI-värde: {action:5.2f} -> Vinkel: {145 + (action*40):.1f}", end="\r")
 
     def set_throttle(self, action):
         """
-        Action: [0, 1] 
+        Tar emot gas-värde mellan 0.0 och 1.0.
+        Mappar det mot ESC:ns arbetsområde (startar från 120).
         """
         if self.mode == "pca9685":
-            # Map [0, 1] to throttle values starting from neutral
             angle = self.throttle_neutral + (action * self.throttle_max)
             self.kit.servo[self.throttle_channel].angle = max(0, min(180, angle))
-        else:
-            pass
 
     def stop(self):
+        """
+        Nödstopp: Sätter allt till neutralt läge.
+        Anropas när man stänger av programmet.
+        """
         if self.mode == "pca9685":
             self.kit.servo[self.steering_channel].angle = self.steer_neutral
             self.kit.servo[self.throttle_channel].angle = self.throttle_neutral
-            print("\nHardware stop (Neutral sent).")
+            print("\nHårdvara stoppad (Neutral skickad).")
