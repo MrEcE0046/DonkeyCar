@@ -22,14 +22,17 @@ Detta projekt beskriver utvecklingen av en självkörande RC-bil som navigerar e
 ### Mjukvaruarkitektur och dataflöde
 Systemet bygger på en sammanhängande mjukvarupipeline som sträcker sig från simulering till fysisk exekvering. Processen är uppdelad i tre huvudfaser: träning, verifiering och inferens.
 Inlärningsprocessen drivs av algoritmen PPO (Proximal Policy Optimization). För att maximera effektiviteten används SubprocVecEnv, vilket möjliggör körning av 16 parallella simuleringsmiljöer. Detta accelererar datainsamlingen och stabiliserar policyns uppdateringar. Learning Rate har succissivt sänkts under projektets gång och hamnade på 0.00001 som verkade ge bäst resultat till slut. Miljön fungerar som en brygga mellan fysikmotorn PyBullet och RL-algoritmen. Genom så kallad Reward Shaping tilldelas agenten belöningar baserat på centrering, vinkel i förhållande till banan och mjukhet i styrutslag, medan avvikelser och kollisioner leder till bestraffningar.
+
 Beslutsfattandet centraliseras i ett skräddarsytt CNN. Nätverket är uppbyggt av sex konvolutionella lager som fungerar som hierarkiska filter. De första lagren extraherar primitiva former såsom kanter och linjer, medan de djupare lagren tolkar komplexa mönster som kurvatur och banans räckvidd. Den extraherade informationen komprimeras till en feature vector med 512 dimensioner. Denna breda representation möjliggör för modellen att lagra nyanserade detaljer om körsituationen innan datan skickas till det slutgiltiga linjära lagret för beslut om styrvinkel.
+
 För att bibehålla medvetenhet används VecFrameStack med parametern $n\_stack=4$. Detta innebär att modellen inte fattar beslut baserat på en enskild stillbild, utan på en sekvens av de fyra senaste observationerna. Denna metod är bra för att systemet ska kunna beräkna fordonets hastighet och vinkelhastighet. Före analys genomgår varje bild en förbehandlingsprocess vilken inkluderar:
 
-* **Beskäring:**: Oviktig information såsom horisonten avlägsnas för att minska beräkningsbördan.
-* **Normalisering:**: Pixelvärden skalas om till intervallet [0, 1] för stabilare gradienter.
-* **Kanalformatering:**: Bildmatrisen transformeras till formatet (Channels, Height, Width) för kompatibilitet med PyTorch.
+* **Beskäring:** Oviktig information såsom horisonten avlägsnas för att minska beräkningsbördan.
+* **Normalisering:** Pixelvärden skalas om till intervallet [0, 1] för stabilare gradienter.
+* **Kanalformatering:** Bildmatrisen transformeras till formatet (Channels, Height, Width) för kompatibilitet med PyTorch.
 
 Efter avslutad träning utvärderas modellen genom test_model.py. Detta steg är avgörande för att identifiera eventuell överträning (overfitting), där modellen memorerat specifika banor istället för att lära sig generella navigeringsprinciper. Genom visuell verifiering i en grafisk miljö analyseras bilens beteende, särskilt avseende stabilitet och förmågan att parera systemlatens, innan modellen exporteras till det fysiska fordonet.
+
 I den slutliga fasen exporteras den tränade modellen till formatet ONNX för att möjliggöra högpresterande inferens på Raspberry Pi 5. Skriptet main.py ansvarar för att läsa in live-bilder från kameran, genomföra samma förbehandling som i simulatorn och reglera styrservot via PCA9685 komponenten i realtid. Genom att matcha simulatorns kameravinkel och latens i den fysiska miljön säkerställs att den inlärda policyn kan appliceras framgångsrikt i verkligheten.
 
 ---
