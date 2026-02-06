@@ -5,10 +5,14 @@ Detta projekt tränar en RC-bil i simulering för att följa en linje med hjälp
 ## Projektstruktur
 
 - `sim/`: Simulator byggd i PyBullet/Gymnasium.
+    - `utils.py`: Förbereder bilderna och banan.
+    - `test_model.py`: Kontrollerar att hjärnan fungerar som den ska.
 - `training/`: RL-träningsloop och CNN-policy definition.
+    - `model.py`: Definierar hjärnan (512 dim).
+    - `train.py`: Tränar upp hjärnan i 16 parallella världar.
 - `export/`: Verktyg för att exportera modeller till ONNX.
 - `raspi/`: Programvara för Raspberry Pi (kamera, inferens, PWM).
-- `docs/`: Dokumentation och README.
+    - `main.py`: Körs på RPi för att köra RCn
 
 ## Installation
 
@@ -29,6 +33,12 @@ python training/train.py
 ```
 
 Modeller sparas i katalogen `models/`.
+
+För att titta på träningen:
+
+```bash
+python Simulator/test_model.py
+```
 
 ### 3. Export
 När du är nöjd med resultatet, konvertera till ONNX:
