@@ -54,11 +54,3 @@ Kör sedan:
 ```bash
 python raspi/main.py
 ```
-
-## Krav
-- Python 3.11+
-- PyBullet
-- Gymnasium
-- Stable Baselines 3
-- ONNX Runtime
-- OpenCV
