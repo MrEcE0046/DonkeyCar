@@ -62,4 +62,3 @@ python raspi/main.py
 - Stable Baselines 3
 - ONNX Runtime
 - OpenCV
-- RPi.GPIO / pigpio (för Raspberry Pi)
