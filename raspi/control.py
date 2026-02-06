@@ -1,12 +1,8 @@
 import time
+from adafruit_servokit import ServoKit
 
 # Försök importera hårdvarubiblioteket. Om det misslyckas (t.ex. på en PC) 
 # körs koden i "debug-läge" istället för att krascha.
-try:
-    from adafruit_servokit import ServoKit
-    PCA9685_AVAILABLE = True
-except ImportError:
-    PCA9685_AVAILABLE = False
 
 class RCControl:
     def __init__(self, steering_channel=0, throttle_channel=1):
