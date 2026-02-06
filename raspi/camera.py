@@ -2,6 +2,8 @@ import cv2
 import numpy as np
 import threading
 import time
+
+# Försök ladda Picamera2 (Raspberry Pi 5s kamera-bibliotek)
 try:
     from picamera2 import Picamera2
     PICAMERA_AVAILABLE = True
@@ -10,59 +12,61 @@ except ImportError:
 
 class Camera:
     def __init__(self, resolution=(640, 480), target_size=(160, 80)):
+        """
+        resolution: Kamerans råa upplösning.
+        target_size: Den storlek AI-modellen förväntar sig (160x80).
+        """
         self.target_size = target_size
         self.resolution = resolution
         
-        # V9: Color & Exposure Overrides
-        # Set to True if the yellow line looks Cyan/Blue in debug images
+        # --- FÄRGKORRIGERING ---
+        # Om färger ser konstiga ut i debug-bilderna (t.ex. gul linje blir blå),
+        # kan denna sättas till True för att kasta om färgkanalerna.
         self.ENABLE_BGR_FLIP = False 
         self.frame = None
         self.stopped = False
-        self.lock = threading.Lock()
+        self.lock = threading.Lock() # Förhindrar att trådar krockar vid bildläsning
         
         if PICAMERA_AVAILABLE:
             try:
                 self.picam2 = Picamera2()
-                # Use VIDEO configuration for continuous capture stability
+                # Konfigurera kameran för video-läge (snabbare än stillbild)
                 config = self.picam2.create_video_configuration(
                     main={"size": resolution, "format": "RGB888"}
                 )
                 self.picam2.configure(config)
                 
-                # V9.1: Restore Auto Exposure
-                # Fixed exposure was too dark for indoor testing.
-                self.picam2.set_controls({
-                    "AeEnable": True
-                })
-                
+                # Auto-exponering på: Viktigt för att hantera skuggor/ljus inomhus
+                self.picam2.set_controls({"AeEnable": True})
                 self.picam2.start()
                 self.use_picamera = True
-                print("Camera initialized: Picamera2 (RGB888 Video Mode)")
-                # CRITICAL: Wait for hardware to fully sync before starting thread
-                time.sleep(2.0)
+                print("Kamera: Picamera2 startad (RGB888)")
+                time.sleep(2.0) # Låt hårdvaran stabiliseras
             except Exception as e:
-                print(f"Failed to initialize Picamera2: {e}. Falling back to OpenCV.")
+                print(f"Picamera2 misslyckades: {e}. Fallback till OpenCV.")
                 self.use_picamera = False
         else:
             self.use_picamera = False
 
+        # Fallback om Picamera2 inte finns (t.ex. vanlig USB-webbkamera)
         if not self.use_picamera:
             self.cap = cv2.VideoCapture(0)
             self.cap.set(cv2.CAP_PROP_FRAME_WIDTH, resolution[0])
             self.cap.set(cv2.CAP_PROP_FRAME_HEIGHT, resolution[1])
             self.cap.set(cv2.CAP_PROP_FPS, 30)
-            print("Camera initialized: OpenCV")
+            print("Kamera: OpenCV startad")
 
-        # Start background capture thread
+        # --- BAKGRUNDSTRÅD ---
+        # Startar _update i en egen tråd så att kameran aldrig behöver vänta på AI:n.
         self.thread = threading.Thread(target=self._update, args=())
         self.thread.daemon = True
         self.thread.start()
 
     def _update(self):
+        """ Loop som konstant hämtar den senaste bilden från hårdvaran. """
         while not self.stopped:
             try:
                 if self.use_picamera:
-                    # capture_array is synchronous but called in background thread
                     f = self.picam2.capture_array()
                 else:
                     ret, f = self.cap.read()
@@ -74,43 +78,48 @@ class Camera:
                     with self.lock:
                         self.frame = f
             except Exception as e:
-                # Log error but keep thread alive
-                print(f"Capture thread error: {e}")
+                print(f"Fel i kameratråden: {e}")
                 time.sleep(0.1)
 
     def get_frame(self):
+        """ Returnerar den senaste bilden säkert. """
         with self.lock:
             return self.frame
 
     def preprocess(self, frame):
-        """
-        V3 Hyper-Turbo: Input is RGB888. 
+        """ 
+        Gör om den stora kamerabilden till vad AI:n vill ha.
+        Viktigt: AI:n behöver (3, 80, 160) i flyttal mellan 0 och 1.
         """
         if frame is None: return None
         
-        # 1. Fast Crop: Picamera2 is already RGB. 
-        # Match model exactly 2:1 ratio (with updated 85px trick).
+        # 1. CROP (Beskärning)
+        # Vi tar bort den översta tredjedelen (himlen/väggarna) 
+        # och fokuserar på marken (160 till 480 pixlar ner).
         h, w = frame.shape[:2]
-        crop_top = 160 # Bottom 2/3 of 480
+        crop_top = 160 
         crop_bottom = 480
-        
-        # Remove BGR flip (::-1) and use adjusted crop
         crop = frame[crop_top:crop_bottom, :]
         
         if self.ENABLE_BGR_FLIP:
-            # V9 Color Fix: If yellow looks cyan, flip BGR to RGB (or vice versa)
             crop = cv2.cvtColor(crop, cv2.COLOR_RGB2BGR)
         
-        # 2. Fast Resize
+        # 2. RESIZE
+        # Skalar ner bilden till AI:ns upplösning (160x80).
         resized = cv2.resize(crop, self.target_size, interpolation=cv2.INTER_LINEAR)
         
-        # 3. Transpose & Normalize
+        # 3. FORMATTERING (NCHW)
+        # Flyttar färgkanalen först: (Höjd, Bredd, Kanaler) -> (Kanaler, Höjd, Bredd)
         processed = resized.transpose(2, 0, 1).astype(np.float32)
+        
+        # Normalisering: Gör om pixlar (0-255) till värden mellan (0.0 - 1.0)
         processed *= (1.0 / 255.0)
         
+        # Lägger till en extra dimension för "batch size" (1, 3, 80, 160)
         return np.expand_dims(processed, axis=0)
 
     def release(self):
+        """ Stänger ner kameran snyggt. """
         self.stopped = True
         if self.thread.is_alive():
             self.thread.join(timeout=1.0)
@@ -121,11 +130,3 @@ class Camera:
                 pass
         else:
             self.cap.release()
-
-    def save_image(self, filename):
-        f = self.get_frame()
-        if f is not None:
-            # AI sees flipped, so we save what the AI sees for debug
-            proc = self.preprocess(f)[0] # (3, 80, 160)
-            vis = (proc.transpose(1, 2, 0) * 255).astype(np.uint8)
-            cv2.imwrite(filename, cv2.cvtColor(vis, cv2.COLOR_RGB2BGR))
