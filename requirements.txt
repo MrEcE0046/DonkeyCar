@@ -8,3 +8,4 @@ shimmy
 adafruit_servokit
 picamera2
 onnxruntime
+onnx
